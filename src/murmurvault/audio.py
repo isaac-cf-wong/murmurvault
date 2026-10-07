@@ -5,7 +5,7 @@ them apart gives a free "me vs. others" speaker split and gives diarization a cl
 """
 
 # Optional and platform-specific dependencies (sounddevice needs PortAudio, catap is macOS-only, PyAV
-# comes with the whisper extra) are imported where they are used, so the rest of the package works
+# comes with the av or whisper extra) are imported where they are used, so the rest of the package works
 # without them.
 # ruff: noqa: PLC0415
 
@@ -113,7 +113,7 @@ def load_audio(path: str | Path) -> np.ndarray:
     """Decode any audio or video file to 16 kHz mono float32.
 
     libsndfile handles WAV/FLAC/OGG/MP3; anything else (m4a, webm, mp4, ...) goes through PyAV, which the
-    ``whisper`` extra installs.
+    ``av`` extra installs (``whisper`` brings it too).
 
     Args:
         path: File to decode.
@@ -132,7 +132,7 @@ def load_audio(path: str | Path) -> np.ndarray:
     try:
         import av
     except ImportError as exc:
-        raise RuntimeError(f"cannot decode {path}: install `murmurvault[whisper]` for PyAV support") from exc
+        raise RuntimeError(f"cannot decode {path}: install `murmurvault[av]` for PyAV support") from exc
     chunks = []
     with av.open(str(path)) as container:
         if not container.streams.audio:
@@ -142,6 +142,40 @@ def load_audio(path: str | Path) -> np.ndarray:
             chunks.extend(f.to_ndarray().reshape(-1) for f in resampler.resample(frame))
         chunks.extend(f.to_ndarray().reshape(-1) for f in resampler.resample(None))
     return np.concatenate(chunks).astype(np.float32) if chunks else np.zeros(0, np.float32)
+
+
+def split_at_pauses(audio: np.ndarray, max_s: float, min_s: float | None = None) -> list[tuple[int, int]]:
+    """Cut a recording into chunks of at most ``max_s``, each ending at the quietest 100 ms frame.
+
+    Args:
+        audio: 16 kHz mono samples.
+        max_s: Maximum chunk length in seconds; at least one 100 ms frame.
+        min_s: Earliest point in a chunk to look for a pause; defaults to half of ``max_s``.
+
+    Returns:
+        ``(start, end)`` sample ranges covering ``audio`` without gaps.
+
+    Raises:
+        ValueError: If ``max_s`` is shorter than a frame or ``min_s`` is not in ``[0, max_s]``.
+    """
+    frame = SR // 10
+    min_s = max_s / 2 if min_s is None else min_s
+    if max_s * SR < frame or not 0 <= min_s <= max_s:
+        raise ValueError(f"need 0 <= min_s <= max_s and max_s >= 0.1, got min_s={min_s}, max_s={max_s}")
+    max_n = int(max_s * SR)
+    min_n = min(int(min_s * SR), max_n - frame)
+    ranges: list[tuple[int, int]] = []
+    start = 0
+    while len(audio) - start > max_n:
+        lo = start + (min_n // frame) * frame
+        hi = start + (max_n // frame) * frame
+        frames = audio[lo:hi].reshape(-1, frame)
+        cut = lo + (int(np.argmin(np.mean(np.square(frames), axis=1))) + 1) * frame
+        ranges.append((start, cut))
+        start = cut
+    if start < len(audio):
+        ranges.append((start, len(audio)))
+    return ranges
 
 
 def save_flac(path: Path, audio: np.ndarray) -> None:

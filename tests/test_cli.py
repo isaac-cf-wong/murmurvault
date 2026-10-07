@@ -101,3 +101,47 @@ def test_errors_are_one_line(cli_env):
     assert result.exit_code == 1
     assert "no recording matches" in result.output
     assert "Traceback" not in result.output
+
+
+def test_error_text_keeps_square_brackets(cli_env, tmp_path, monkeypatch):
+    """Error messages are printed literally, so an extra like ``pkg[av]`` is not eaten as markup."""
+    from murmurvault import audio
+
+    def fail(path):
+        raise RuntimeError("install `murmurvault[av]` for PyAV support")
+
+    monkeypatch.setattr(audio, "load_audio", fail)
+    clip = tmp_path / "memo.m4a"
+    clip.write_bytes(b"not audio")
+    result = runner.invoke(app, ["import", str(clip), "--no-transcribe"])
+    assert result.exit_code == 1
+    assert "murmurvault[av]" in result.output
+
+
+def test_import_continues_after_a_failed_file(cli_env, tmp_path):
+    """One undecodable file is reported, the others are imported and listed, and the exit code is 1."""
+    bad = tmp_path / "broken.wav"
+    bad.write_bytes(b"not audio")
+    good = tmp_path / "memo.wav"
+    sf.write(good, np.zeros(16000, np.float32), 16000)
+    result = runner.invoke(app, ["import", str(bad), str(good), "--no-transcribe", "--json"])
+    assert result.exit_code == 1
+    assert "broken.wav" in result.output
+    imported = json.loads(result.stdout)
+    assert [r["title"] for r in imported] == ["memo"]
+
+
+def test_import_reports_transcription_failure_with_id(cli_env, tmp_path, monkeypatch):
+    """A file that imports but fails to transcribe is kept, listed, and named with its retry command."""
+    from murmurvault import pipeline
+
+    def fail(*args, **kwargs):
+        raise RuntimeError("cannot reach http://h/v1: connection refused")
+
+    monkeypatch.setattr(pipeline, "transcribe_recording", fail)
+    good = tmp_path / "memo.wav"
+    sf.write(good, np.zeros(16000, np.float32), 16000)
+    result = runner.invoke(app, ["import", str(good), "--json"])
+    assert result.exit_code == 1
+    [rec] = json.loads(result.stdout)
+    assert f"murmurvault transcribe {rec['id']}" in result.output.replace("\n", "")

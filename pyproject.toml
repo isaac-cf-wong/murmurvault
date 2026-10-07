@@ -45,10 +45,11 @@ dependencies = [
 
 [project.optional-dependencies]
 whisper = ["faster-whisper>=1.1"]
+av = ["av>=14"]
 search = ["sentence-transformers>=3.3"]
 diarize = ["pyannote.audio>=4.0"]
 macos = ["catap>=0.6; sys_platform == 'darwin'"]
-all = ["murmurvault[whisper,search,diarize,macos]"]
+all = ["murmurvault[whisper,av,search,diarize,macos]"]
 
 [dependency-groups]
 dev = [

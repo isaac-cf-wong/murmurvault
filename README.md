@@ -39,6 +39,7 @@ notes.
 
 ```bash
 pip install "murmurvault[whisper,search]"          # built-in engine + semantic search
+pip install "murmurvault[av]"                       # API engines only; av decodes m4a/mp4/webm imports
 pip install "murmurvault[whisper,search,diarize]"  # + speaker diarization (pyannote)
 pip install "murmurvault[all]"                      # everything, incl. macOS system-audio capture
 ```

@@ -18,6 +18,7 @@ from typing import Annotated, Any
 import typer
 from rich.console import Console
 from rich.logging import RichHandler
+from rich.markup import escape
 from rich.table import Table
 
 from murmurvault import config as config_mod
@@ -107,7 +108,7 @@ def handle_errors(fn):
             return fn(*args, **kwargs)
         except (KeyError, ValueError, RuntimeError, FileNotFoundError) as exc:
             msg = exc.args[0] if isinstance(exc, KeyError) and exc.args else str(exc)
-            err.print(f"[red]error:[/red] {msg}")
+            err.print(f"[red]error:[/red] {escape(msg)}")
             raise typer.Exit(1) from None
 
     return wrapper
@@ -190,20 +191,41 @@ def import_(  # noqa: PLR0913, PLR0917 -- one parameter per command-line option
     diarize: Annotated[bool | None, typer.Option("--diarize/--no-diarize")] = None,
     as_json: JsonOpt = False,
 ):
-    """Import existing audio/video files (record first, transcribe later)."""
+    """Import existing audio/video files (record first, transcribe later).
+
+    A file that fails does not stop the others; the exit code is 1 if any failed.
+    """
     from murmurvault.pipeline import import_file, transcribe_recording
 
     cfg, vault = _env()
     out = []
+    failed = False
     for f in files:
-        rec = import_file(vault, f, title=title if len(files) == 1 else "", folder=folder, tags=tag)
+        try:
+            rec = import_file(vault, f, title=title if len(files) == 1 else "", folder=folder, tags=tag)
+        except (KeyError, ValueError, RuntimeError, OSError) as exc:
+            err.print(f"[red]error:[/red] {escape(f.name)}: {escape(str(exc))}")
+            failed = True
+            continue
         if transcribe:
-            transcribe_recording(vault, rec, cfg, engine=engine, model=model, diarization=diarize, progress=_progress)
+            try:
+                transcribe_recording(
+                    vault, rec, cfg, engine=engine, model=model, diarization=diarize, progress=_progress
+                )
+            except (KeyError, ValueError, RuntimeError, OSError) as exc:
+                msg = exc.args[0] if isinstance(exc, KeyError) and exc.args else str(exc)
+                err.print(
+                    f"[red]error:[/red] {escape(f.name)} imported as {rec.id} but not transcribed: {escape(msg)}; "
+                    f"retry with `murmurvault transcribe {rec.id}`"
+                )
+                failed = True
         out.append(_rec_dict(vault, rec))
         if not as_json:
-            err.print(f"imported {f.name} → {rec.id}")
+            err.print(f"imported {escape(f.name)} → {rec.id}")
     if as_json:
         _emit(out)
+    if failed:
+        raise typer.Exit(1)
 
 
 @app.command()

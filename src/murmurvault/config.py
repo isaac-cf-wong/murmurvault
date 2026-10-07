@@ -87,6 +87,8 @@ type = "openai"         # any OpenAI-compatible /v1/audio/transcriptions server
 base_url = "https://api.openai.com/v1"
 api_key_env = "OPENAI_API_KEY"
 model = "whisper-1"
+# chunk_s = 30          # max seconds per upload, cut at a pause; servers that return one segment per
+#                       # upload (e.g. Qwen3-ASR) give timestamps only this fine
 
 # A local server, e.g. speaches or whisper.cpp's server:
 # [engines.lan]

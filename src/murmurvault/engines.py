@@ -14,7 +14,7 @@ import numpy as np
 import soundfile as sf
 
 from murmurvault import config as config_mod
-from murmurvault.audio import SR
+from murmurvault.audio import SR, split_at_pauses
 from murmurvault.vault import Segment
 
 
@@ -89,10 +89,11 @@ class FasterWhisperEngine:
 class OpenAICompatibleEngine:
     """Any server implementing ``POST /v1/audio/transcriptions``: OpenAI, Groq, speaches, whisper.cpp, ..."""
 
-    # Upload length in seconds; 10 minutes of 16 kHz FLAC stays well under hosted APIs' ~25 MB limit.
-    CHUNK_S = 600
+    # Default upload length in seconds. Some servers (e.g. Qwen3-ASR on oMLX) return one segment per
+    # upload, so the upload length bounds the timestamp resolution of the transcript and its search hits.
+    CHUNK_S = 30.0
 
-    def __init__(self, name: str, base_url: str, model: str, api_key: str | None = None):
+    def __init__(self, name: str, base_url: str, model: str, api_key: str | None = None, chunk_s: float = CHUNK_S):
         """Configure the endpoint.
 
         Args:
@@ -100,10 +101,14 @@ class OpenAICompatibleEngine:
             base_url: API base URL, e.g. ``https://api.openai.com/v1``.
             model: Model name as the server knows it.
             api_key: Bearer token, if the server needs one.
+            chunk_s: Maximum upload length in seconds, at least 0.1; uploads end at the quietest moment in
+                their second half, and the last may run up to 100 ms over. Keep it under 10 minutes for hosted
+                APIs' ~25 MB upload limit.
         """
         self.name, self.model = name, model
         self.base_url = base_url.rstrip("/")
         self.api_key = api_key
+        self.chunk_s = chunk_s
 
     def _post(self, audio: np.ndarray, language: str | None, response_format: str) -> dict:
         import httpx
@@ -114,13 +119,16 @@ class OpenAICompatibleEngine:
         if language:
             data["language"] = language
         headers = {"Authorization": f"Bearer {self.api_key}"} if self.api_key else {}
-        resp = httpx.post(
-            f"{self.base_url}/audio/transcriptions",
-            headers=headers,
-            data=data,
-            files={"file": ("audio.flac", buf.getvalue(), "audio/flac")},
-            timeout=900,
-        )
+        try:
+            resp = httpx.post(
+                f"{self.base_url}/audio/transcriptions",
+                headers=headers,
+                data=data,
+                files={"file": ("audio.flac", buf.getvalue(), "audio/flac")},
+                timeout=900,
+            )
+        except httpx.HTTPError as exc:
+            raise RuntimeError(f"cannot reach {self.base_url}: {exc}") from exc
         if resp.status_code >= HTTPStatus.BAD_REQUEST:
             raise RuntimeError(f"{resp.status_code} from {self.base_url}: {resp.text[:300]}")
         return resp.json()
@@ -144,7 +152,7 @@ class OpenAICompatibleEngine:
         return [Segment(start=offset, end=offset + len(audio) / SR, text=text)] if text else []
 
     def transcribe(self, audio: np.ndarray, language: str | None = None, fast: bool = False) -> list[Segment]:
-        """Upload the audio in chunks and collect the segments.
+        """Upload the audio in chunks cut at pauses and collect the segments.
 
         Args:
             audio: 16 kHz mono float32 samples.
@@ -154,12 +162,14 @@ class OpenAICompatibleEngine:
         Returns:
             Segments with times relative to the start of ``audio``.
         """
-        step = self.CHUNK_S * SR
+        ranges = split_at_pauses(audio, self.chunk_s)
+        # Clips of 100 ms or less are not uploaded on their own; send such a tail with the previous upload.
+        if len(ranges) > 1 and ranges[-1][1] - ranges[-1][0] <= SR // 10:
+            ranges[-2:] = [(ranges[-2][0], ranges[-1][1])]
         out: list[Segment] = []
-        for i in range(0, max(len(audio), 1), step):
-            chunk = audio[i : i + step]
-            if len(chunk) > SR // 10:
-                out.extend(self._one(chunk, language, i / SR))
+        for start, end in ranges:
+            if end - start > SR // 10:
+                out.extend(self._one(audio[start:end], language, start / SR))
         return out
 
 
@@ -197,5 +207,6 @@ def get_engine(cfg: dict, name: str | None = None, model: str | None = None) -> 
             base_url=section["base_url"],
             model=model or section["model"],
             api_key=config_mod.api_key(section),
+            chunk_s=float(section.get("chunk_s", OpenAICompatibleEngine.CHUNK_S)),
         )
     raise ValueError(f"engine {name!r} has unknown type {kind!r} (expected faster-whisper or openai)")
