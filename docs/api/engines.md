@@ -1,6 +1,6 @@
 ---
 title: Engines
-description: Transcription engines: built-in faster-whisper and OpenAI-compatible APIs.
+description: "Transcription engines: built-in faster-whisper and OpenAI-compatible APIs."
 ---
 
 <!-- prettier-ignore-start -->
