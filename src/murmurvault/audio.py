@@ -149,20 +149,20 @@ def split_at_pauses(audio: np.ndarray, max_s: float, min_s: float | None = None)
 
     Args:
         audio: 16 kHz mono samples.
-        max_s: Maximum chunk length in seconds.
+        max_s: Maximum chunk length in seconds; at least one 100 ms frame.
         min_s: Earliest point in a chunk to look for a pause; defaults to half of ``max_s``.
 
     Returns:
         ``(start, end)`` sample ranges covering ``audio`` without gaps.
 
     Raises:
-        ValueError: If ``max_s`` is not positive or ``min_s`` is not in ``[0, max_s]``.
+        ValueError: If ``max_s`` is shorter than a frame or ``min_s`` is not in ``[0, max_s]``.
     """
-    min_s = max_s / 2 if min_s is None else min_s
-    if max_s <= 0 or not 0 <= min_s <= max_s:
-        raise ValueError(f"need 0 <= min_s <= max_s and max_s > 0, got min_s={min_s}, max_s={max_s}")
     frame = SR // 10
-    max_n = max(int(max_s * SR), frame)
+    min_s = max_s / 2 if min_s is None else min_s
+    if max_s * SR < frame or not 0 <= min_s <= max_s:
+        raise ValueError(f"need 0 <= min_s <= max_s and max_s >= 0.1, got min_s={min_s}, max_s={max_s}")
+    max_n = int(max_s * SR)
     min_n = min(int(min_s * SR), max_n - frame)
     ranges: list[tuple[int, int]] = []
     start = 0

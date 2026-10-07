@@ -101,8 +101,9 @@ class OpenAICompatibleEngine:
             base_url: API base URL, e.g. ``https://api.openai.com/v1``.
             model: Model name as the server knows it.
             api_key: Bearer token, if the server needs one.
-            chunk_s: Maximum upload length in seconds; uploads end at the quietest moment in their second
-                half. Keep it under 10 minutes for hosted APIs' ~25 MB upload limit.
+            chunk_s: Maximum upload length in seconds, at least 0.1; uploads end at the quietest moment in
+                their second half, and the last may run up to 100 ms over. Keep it under 10 minutes for hosted
+                APIs' ~25 MB upload limit.
         """
         self.name, self.model = name, model
         self.base_url = base_url.rstrip("/")
@@ -161,8 +162,12 @@ class OpenAICompatibleEngine:
         Returns:
             Segments with times relative to the start of ``audio``.
         """
+        ranges = split_at_pauses(audio, self.chunk_s)
+        # Clips of 100 ms or less are not uploaded on their own; send such a tail with the previous upload.
+        if len(ranges) > 1 and ranges[-1][1] - ranges[-1][0] <= SR // 10:
+            ranges[-2:] = [(ranges[-2][0], ranges[-1][1])]
         out: list[Segment] = []
-        for start, end in split_at_pauses(audio, self.chunk_s):
+        for start, end in ranges:
             if end - start > SR // 10:
                 out.extend(self._one(audio[start:end], language, start / SR))
         return out

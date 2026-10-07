@@ -64,7 +64,7 @@ def test_split_at_pauses_short_audio(n):
     assert split_at_pauses(np.zeros(n, np.float32), 30) == ([(0, n)] if n else [])
 
 
-@pytest.mark.parametrize(("max_s", "min_s"), [(0, None), (-1, None), (10, 11), (10, -1)])
+@pytest.mark.parametrize(("max_s", "min_s"), [(0, None), (-1, None), (0.05, None), (10, 11), (10, -1)])
 def test_split_at_pauses_rejects_bad_bounds(max_s, min_s):
     """Non-positive maxima and minima outside [0, max] are errors, not infinite loops."""
     with pytest.raises(ValueError, match="min_s"):

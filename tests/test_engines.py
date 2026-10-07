@@ -34,6 +34,21 @@ def test_api_engine_uploads_short_chunks_and_offsets_segments(monkeypatch):
     assert segs[0].end == pytest.approx(segs[1].start)
 
 
+def test_api_engine_keeps_a_tail_shorter_than_one_frame(monkeypatch):
+    """A cut just before the end does not drop the last few samples; they go with the previous upload."""
+    audio = _speech(30.05)
+    audio[30 * SR - SR // 10 : 30 * SR] = 0  # the only quiet frame ends at 30.0 s, leaving a 50 ms tail
+    uploads = []
+
+    def fake_post(self, chunk, language, response_format):
+        uploads.append(len(chunk))
+        return {"text": "x", "segments": [{"start": 0.0, "end": len(chunk) / SR, "text": "x"}]}
+
+    monkeypatch.setattr(OpenAICompatibleEngine, "_post", fake_post)
+    OpenAICompatibleEngine("lan", "http://h/v1", "m").transcribe(audio)
+    assert sum(uploads) == len(audio)
+
+
 def test_api_engine_chunk_s_from_config():
     """``chunk_s`` in an engine section sets the upload length; it defaults to 30 s."""
     cfg = {"transcription": {"engine": "lan"}, "engines": {"lan": {"type": "openai", "base_url": "u", "model": "m"}}}
