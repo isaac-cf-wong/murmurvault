@@ -1,3 +1,7 @@
+[default.extend-words]
+# speaches: an OpenAI-compatible speech-to-text server (github.com/speaches-ai/speaches)
+speaches = "speaches"
+
 [default]
 extend-ignore-re = [
   # === Block ignore: typos:off → typos:on ===

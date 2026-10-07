@@ -1,7 +1,8 @@
 cff-version: 1.2.0
 title:
-    'python-package-template: A GitHub template repository for a Python package'
-license: 'BSD'
+    'murmurvault: Local-first recording, transcription and semantic search for
+    meetings and voice notes'
+license: 'BSD-3-Clause'
 type: software
 authors:
     - given-names: Isaac C. F.
@@ -10,5 +11,7 @@ authors:
       orcid: 'https://orcid.org/0000-0003-2166-0027'
 keywords:
     - python
-    - github
-    - template
+    - transcription
+    - speech-to-text
+    - diarization
+    - semantic search
