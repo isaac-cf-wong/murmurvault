@@ -24,10 +24,10 @@ If applicable, show how you would imagine the Python code looking with this new
 feature:
 
 ```python
-import package_name_placeholder
+import murmurvault
 
 # How you'd like to use the new feature
-result = package_name_placeholder.new_function(param="example")
+result = murmurvault.new_function(param="example")
 ```
 
 ## 🌈 Use Case & Benefits
