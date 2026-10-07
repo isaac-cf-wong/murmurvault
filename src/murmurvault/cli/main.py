@@ -165,7 +165,7 @@ def record(  # noqa: PLR0913, PLR0917 -- one parameter per command-line option
         while duration is None or sess.elapsed() < duration:
             time.sleep(0.2)
     except KeyboardInterrupt:
-        pass
+        pass  # Ctrl-C is the normal way to stop; fall through to saving the recording.
     if not as_json:
         err.print("[yellow]■ stopping…[/yellow]")
     rec = sess.stop()

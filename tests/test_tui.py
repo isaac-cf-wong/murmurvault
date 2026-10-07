@@ -78,6 +78,14 @@ def test_tui_browse_search_tag_move(env):
             await pilot.pause()
             assert vault.get(rec.id).tags == ["q4", "urgent"]
 
+            # An invalid tag is rejected without losing the existing tags.
+            await pilot.press("g")
+            await pilot.pause()
+            app.screen.query_one("#prompt-input").value = "keep #"
+            await pilot.press("enter")
+            await pilot.pause()
+            assert vault.get(rec.id).tags == ["q4", "urgent"]
+
             await pilot.press("m")
             await pilot.pause()
             prompt_input = app.screen.query_one("#prompt-input")
@@ -85,5 +93,24 @@ def test_tui_browse_search_tag_move(env):
             await pilot.press("enter")
             await pilot.pause()
             assert vault.get(rec.id).folder == "archive"
+
+    asyncio.run(scenario())
+
+
+def test_record_and_quit_are_ignored_while_the_recorder_starts(env, monkeypatch):
+    """A second `r` or a `q` during the slow recorder start-up must not start a second recorder or exit."""
+    from murmurvault.tui import MurmurApp
+
+    async def scenario():
+        app = MurmurApp()
+        starts = []
+        monkeypatch.setattr(app, "start_recording", lambda: starts.append(1))
+        async with app.run_test(size=(120, 40)) as pilot:
+            await pilot.press("r")
+            await pilot.press("r")
+            await pilot.press("q")
+            await pilot.pause()
+            assert starts == [1]
+            assert app.is_running
 
     asyncio.run(scenario())

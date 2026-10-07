@@ -35,7 +35,6 @@ class Engine(Protocol):
         Returns:
             Segments with times relative to the start of ``audio``.
         """
-        ...
 
 
 _WHISPER_CACHE: dict[tuple[str, str, str], Any] = {}

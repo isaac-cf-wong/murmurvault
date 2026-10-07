@@ -9,6 +9,7 @@ Vectors are brute-forced with numpy, which is fast enough for tens of thousands 
 
 from __future__ import annotations
 
+import json
 import logging
 import re
 import sqlite3
@@ -111,7 +112,9 @@ def chunk_segments(segments: list[Segment], max_chars: int = CHUNK_CHARS) -> lis
             flush()
             window = window[-1:]
             size = len(window[0].text) + 1
-    if window and (not chunks or window[-1].end > chunks[-1]["end"]):
+    # After a flush the window holds only the overlap segment, which is already indexed. Segment ends are
+    # not monotonic once tracks are merged, so compare lengths rather than times.
+    if window and (not chunks or len(window) > 1):
         flush()
     return chunks
 
@@ -331,7 +334,15 @@ class Index:
             return 0
         chunks = chunk_segments(transcript.segments)
         vecs: np.ndarray | None = None
-        if chunks and self.embedder.enabled:
+        stored = self._meta("embedding_model")
+        if chunks and self.embedder.enabled and stored not in {None, self.embedder.model_id}:
+            # Never mix vectors from two models in one index; keyword search still covers these chunks.
+            logger.warning(
+                "index was embedded with %s, config says %s; run `murmurvault reindex` to embed new recordings",
+                stored,
+                self.embedder.model_id,
+            )
+        elif chunks and self.embedder.enabled:
             try:
                 vecs = self.embedder.embed([c["text"] for c in chunks])
                 self._set_meta("embedding_model", self.embedder.model_id)
@@ -363,12 +374,15 @@ class Index:
         q = fts_query(query)
         if not q:
             return []
+        # Filter inside the query so the LIMIT applies to allowed recordings only. The ids travel as one
+        # JSON parameter, which avoids SQLite's limit on the number of bound parameters.
         rows = self.db.execute(
-            "SELECT c.id, c.rec_id FROM chunks_fts f JOIN chunks c ON c.id = f.rowid "
-            "WHERE chunks_fts MATCH ? ORDER BY bm25(chunks_fts) LIMIT ?",
-            (q, limit * 4),
+            "SELECT c.id FROM chunks_fts f JOIN chunks c ON c.id = f.rowid "
+            "WHERE chunks_fts MATCH ? AND c.rec_id IN (SELECT value FROM json_each(?)) "
+            "ORDER BY bm25(chunks_fts) LIMIT ?",
+            (q, json.dumps(sorted(allowed)), limit),
         ).fetchall()
-        return [cid for cid, rid in rows if rid in allowed][:limit]
+        return [cid for (cid,) in rows]
 
     def _semantic(self, query: str, allowed: set[str], limit: int) -> list[int]:
         if not self.embedder.enabled:

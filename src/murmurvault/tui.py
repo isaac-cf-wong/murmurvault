@@ -16,7 +16,7 @@ from textual.widgets import Footer, Header, Input, Label, OptionList, RichLog, S
 from textual.widgets.option_list import Option
 
 from murmurvault import config as config_mod
-from murmurvault.vault import Recording, Segment, Vault, fmt_time
+from murmurvault.vault import Recording, Segment, Vault, fmt_time, normalize_tag
 
 
 class Prompt(ModalScreen[str | None]):
@@ -90,6 +90,8 @@ class MurmurApp(App):
         self.selected: str | None = None
         self.hits: list = []
         self.session = None
+        # True from the `r` key press until the recorder has started or failed; loading the live model is slow.
+        self.starting = False
         self.busy = ""
         # Kept as attributes: App.query_one only searches the active screen, which is a prompt while one is open.
         self.search_box = Input(placeholder="/ search transcripts (Enter)", id="search")
@@ -277,7 +279,11 @@ class MurmurApp(App):
     # -- recording --------------------------------------------------------------------------
     def action_record(self) -> None:
         """Start or stop recording."""
+        if self.starting:
+            self.notify("the recorder is still starting", severity="warning")
+            return
         if self.session is None:
+            self.starting = True
             self.start_recording()
         else:
             self.stop_recording()
@@ -306,10 +312,15 @@ class MurmurApp(App):
                 else:
                     msg = f"system audio unavailable ({exc}); mic only"
                     self.call_from_thread(self.notify, msg, severity="warning")
-        self.call_from_thread(self.set_busy, "")
+
+        def finish() -> None:
+            self.session = sess
+            self.starting = False
+            self.busy = ""
+
+        self.call_from_thread(finish)
         if sess is None:
             return
-        self.session = sess
         self.call_from_thread(view.clear)
         self.call_from_thread(view.write, f"[b red]● Recording[/b red] {sess.rec.id} — press r to stop\n")
 
@@ -374,8 +385,9 @@ class MurmurApp(App):
             if value is None:
                 return
             try:
-                self.vault.set_tags(rec, remove=rec.tags)
-                self.vault.set_tags(rec, add=value.replace(",", " ").split())
+                # Validate everything before changing anything, so a bad tag cannot wipe the others.
+                new = {normalize_tag(t) for t in value.replace(",", " ").split()}
+                self.vault.set_tags(rec, add=new, remove=set(rec.tags) - new)
             except ValueError as exc:
                 self.notify(str(exc), severity="error")
             self.show_recording(rec.id)
@@ -421,7 +433,7 @@ class MurmurApp(App):
 
     def action_quit(self) -> None:
         """Quit, unless a recording is running."""
-        if self.session is not None:
+        if self.session is not None or self.starting:
             self.notify("stop the recording first (r)", severity="warning")
             return
         self.exit()

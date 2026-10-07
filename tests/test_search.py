@@ -98,3 +98,49 @@ def test_semantic_search_finds_synonyms_and_detects_model_change(vault, isolated
     assert index.search("money") == []
     assert "reindex" in caplog.text
     index.close()
+
+
+def test_chunking_keeps_segments_that_end_before_an_overlapping_long_segment():
+    """Merged tracks give non-monotonic ends; text after a long overlapping segment must not be dropped."""
+    segs = [
+        Segment(0, 1, "x" * 150, speaker="others"),
+        Segment(1, 30, "y" * 200, speaker="me"),  # closes the first window and becomes the overlap
+        Segment(5, 6, "short reply", speaker="others"),
+        Segment(8, 10, "another short reply", speaker="others"),
+    ]
+    chunks = chunk_segments(segs, max_chars=300)
+    assert "another short reply" in chunks[-1]["text"]
+
+
+def test_keyword_filter_applies_before_the_candidate_limit(vault, isolated_env):
+    """Many better-ranked matches outside the filter must not crowd out matches inside it."""
+    for i in range(12):
+        rec = vault.new_recording(title=f"noise {i}", folder="other")
+        vault.save_transcript(rec, "x", Transcript("e", "m", [Segment(0, 1, "budget budget budget budget")]))
+    target = vault.new_recording(title="target", folder="wanted")
+    vault.save_transcript(
+        target, "x", Transcript("e", "m", [Segment(0, 1, "a long sentence that mentions the budget once")])
+    )
+    index = Index(vault, isolated_env)
+    index.rebuild()
+    assert [h.rec_id for h in index.search("budget", folder="wanted", candidates=2)] == [target.id]
+    index.close()
+
+
+def test_indexing_with_a_changed_embedding_model_does_not_mix_vectors(vault, isolated_env, caplog):
+    """After the model changes, new chunks are indexed for keywords only until `reindex`."""
+    a = vault.new_recording(title="Costs")
+    vault.save_transcript(a, "x", Transcript("e", "m", [Segment(0, 3, "the cost is too high")]))
+    index = Index(vault, isolated_env)
+    index.embedder = FakeEmbedder()
+    index.rebuild()
+    index.embedder.model_id = "fake:2"
+    b = vault.new_recording(title="More costs")
+    vault.save_transcript(b, "x", Transcript("e", "m", [Segment(0, 3, "the budget grew")]))
+    index.update(b)
+    assert index._meta("embedding_model") == "fake:1"
+    rows = index.db.execute("SELECT emb IS NULL FROM chunks WHERE rec_id = ?", (b.id,)).fetchall()
+    assert rows == [(1,)]
+    assert "reindex" in caplog.text
+    assert [h.rec_id for h in index.search("budget")] == [b.id]  # keyword search still finds it
+    index.close()
